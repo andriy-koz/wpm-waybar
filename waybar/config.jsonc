@@ -1,0 +1,30 @@
+// WPM Waybar module definitions
+// Merge these into your waybar config.jsonc
+//
+// 1. Add to your "modules-center" (or wherever you prefer):
+//    "custom/wpm-live", "custom/wpm-burst", "custom/wpm-avg"
+//
+// 2. Add these module definitions inside the top-level { }:
+
+{
+  "custom/wpm-live": {
+    "exec": "~/.local/bin/wpm-monitor",
+    "return-type": "json",
+    "on-click-right": "pkill -USR1 -f wpm-monitor",
+    "tooltip": true
+  },
+  "custom/wpm-burst": {
+    "exec": "~/.local/bin/wpm-status burst",
+    "return-type": "json",
+    "on-click-right": "pkill -USR1 -f wpm-monitor",
+    "interval": 1,
+    "tooltip": true
+  },
+  "custom/wpm-avg": {
+    "exec": "~/.local/bin/wpm-status avg",
+    "return-type": "json",
+    "on-click-right": "pkill -USR1 -f wpm-monitor",
+    "interval": 1,
+    "tooltip": true
+  }
+}

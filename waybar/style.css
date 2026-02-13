@@ -1,0 +1,23 @@
+/* WPM Waybar module styles
+   Add these rules to your waybar style.css */
+
+#custom-wpm-live,
+#custom-wpm-burst,
+#custom-wpm-avg {
+  min-width: 12px;
+  margin: 0 3px;
+}
+
+#custom-wpm-live.active {
+  color: #f38d70;
+}
+
+#custom-wpm-live.idle,
+#custom-wpm-burst.no-data,
+#custom-wpm-avg.no-data {
+  opacity: 0.5;
+}
+
+#custom-wpm-live.error {
+  opacity: 0.4;
+}
