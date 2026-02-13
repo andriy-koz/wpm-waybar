@@ -53,7 +53,7 @@ for i in range(ecodes.KEY_A, ecodes.KEY_L + 1):
 for i in range(ecodes.KEY_Z, ecodes.KEY_M + 1):
     LETTER_KEYS.add(i)
 
-BURST_TIMEOUT = 2.0  # seconds of inactivity to end a burst
+BURST_TIMEOUT = 1.5  # seconds of inactivity to end a burst
 STATE_FILE = "/tmp/wpm-monitor.json"
 TICK_INTERVAL = 0.2  # 200ms output interval
 SCAN_INTERVAL = 5.0  # 5s device scan interval
