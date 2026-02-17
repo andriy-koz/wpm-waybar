@@ -7,6 +7,7 @@ Also writes state to /tmp/wpm-monitor.json for burst/avg modules.
 """
 
 import asyncio
+import fcntl
 import json
 import os
 import signal
@@ -57,6 +58,7 @@ for i in range(ecodes.KEY_Z, ecodes.KEY_M + 1):
 BURST_TIMEOUT = 1.5  # seconds of inactivity to end a burst
 _runtime_dir = os.environ.get("XDG_RUNTIME_DIR", "/tmp")
 STATE_FILE = os.path.join(_runtime_dir, "wpm-monitor.json")
+LOCK_FILE = os.path.join(_runtime_dir, "wpm-monitor.lock")
 TICK_INTERVAL = 0.2  # 200ms output interval
 SCAN_INTERVAL = 5.0  # 5s device scan interval
 
@@ -367,6 +369,14 @@ async def main():
 
 
 if __name__ == "__main__":
+    # Single-instance guard: exit silently if another instance is running
+    lock_fd = os.open(LOCK_FILE, os.O_WRONLY | os.O_CREAT, 0o600)
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        os.close(lock_fd)
+        sys.exit(0)
+
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
@@ -376,3 +386,8 @@ if __name__ == "__main__":
             os.unlink(STATE_FILE)
         except FileNotFoundError:
             pass
+        try:
+            os.unlink(LOCK_FILE)
+        except FileNotFoundError:
+            pass
+        os.close(lock_fd)
