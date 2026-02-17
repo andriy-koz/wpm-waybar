@@ -193,10 +193,16 @@ def is_nvim_typing_mode() -> bool:
         return True
 
     # mode == "normal" (or anything else) — Layer 2 Hyprland safety net
-    if _focused_class and _focused_class not in TERMINAL_CLASSES:
-        # Focused window isn't a terminal — mode file is stale
-        _nvim_suppressed = False
-        return True
+    # Only suppress if the focused window is actually nvim
+    if _focused_class:
+        nvim_focused = (
+            "nvim" in _focused_class.lower()
+            or "nvim" in _focused_title.lower()
+        )
+        if not nvim_focused:
+            # Focused window isn't nvim — mode file is stale
+            _nvim_suppressed = False
+            return True
 
     # nvim in normal mode — suppress keystrokes
     _nvim_suppressed = True
