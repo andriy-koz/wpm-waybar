@@ -4,12 +4,19 @@
 import json
 import os
 import sys
+from datetime import datetime, timedelta
 
 _runtime_dir = os.environ.get("XDG_RUNTIME_DIR", "/tmp")
 STATE_FILE = os.path.join(_runtime_dir, "wpm-monitor.json")
+_data_dir = os.path.join(os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share")), "wpm-monitor")
+HISTORY_FILE = os.path.join(_data_dir, "history.jsonl")
 
 def main():
     mode = sys.argv[1] if len(sys.argv) > 1 else ""
+
+    if mode == "history":
+        show_history()
+        return
 
     try:
         with open(STATE_FILE) as f:
@@ -40,6 +47,66 @@ def main():
             "tooltip": f"Session avg: {wpm} WPM ({acc_str} acc, {bursts} bursts)",
             "class": "has-data" if wpm > 0 else "no-data",
         }))
+
+def show_history():
+    try:
+        with open(HISTORY_FILE) as f:
+            lines = f.readlines()
+    except FileNotFoundError:
+        print("No history yet. Start typing with wpm-monitor running.")
+        return
+
+    sessions = []
+    for line in lines:
+        line = line.strip()
+        if line:
+            try:
+                sessions.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+
+    if not sessions:
+        print("No history yet.")
+        return
+
+    # Last 10 sessions
+    recent = sessions[-10:]
+    print("Recent sessions:")
+    print(f"  {'Date':<18} {'WPM':>5} {'Acc':>7} {'Bursts':>7} {'Chars':>6} {'Duration':>8}")
+    print(f"  {'-'*18} {'-'*5} {'-'*7} {'-'*7} {'-'*6} {'-'*8}")
+    for s in recent:
+        dt = datetime.fromtimestamp(s["ts"]).strftime("%Y-%m-%d %H:%M")
+        dur = s.get("dur", 0)
+        if dur >= 3600:
+            dur_str = f"{dur // 3600}h{dur % 3600 // 60:02d}m"
+        elif dur >= 60:
+            dur_str = f"{dur // 60}m{dur % 60:02d}s"
+        else:
+            dur_str = f"{dur}s"
+        print(f"  {dt:<18} {s['wpm']:>5} {s['acc']:>6.1f}% {s['bursts']:>7} {s['chars']:>6} {dur_str:>8}")
+
+    # Weekly averages if we have sessions spanning more than one week
+    if len(sessions) < 2:
+        return
+
+    now = datetime.now()
+    weeks: dict[str, list] = {}
+    for s in sessions:
+        dt = datetime.fromtimestamp(s["ts"])
+        week_start = dt - timedelta(days=dt.weekday())
+        week_key = week_start.strftime("%Y-%m-%d")
+        weeks.setdefault(week_key, []).append(s)
+
+    if len(weeks) >= 2:
+        print(f"\nWeekly averages:")
+        print(f"  {'Week of':<12} {'Avg WPM':>8} {'Avg Acc':>8} {'Sessions':>9}")
+        print(f"  {'-'*12} {'-'*8} {'-'*8} {'-'*9}")
+        for week_key in sorted(weeks.keys()):
+            ws = weeks[week_key]
+            avg_wpm = round(sum(s["wpm"] for s in ws) / len(ws))
+            avg_acc = round(sum(s["acc"] for s in ws) / len(ws), 1)
+            print(f"  {week_key:<12} {avg_wpm:>8} {avg_acc:>7.1f}% {len(ws):>9}")
+
 
 if __name__ == "__main__":
     main()

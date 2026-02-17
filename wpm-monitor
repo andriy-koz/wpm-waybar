@@ -59,6 +59,8 @@ BURST_TIMEOUT = 1.0  # seconds of inactivity to end a burst
 _runtime_dir = os.environ.get("XDG_RUNTIME_DIR", "/tmp")
 STATE_FILE = os.path.join(_runtime_dir, "wpm-monitor.json")
 LOCK_FILE = os.path.join(_runtime_dir, "wpm-monitor.lock")
+_data_dir = os.path.join(os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share")), "wpm-monitor")
+HISTORY_FILE = os.path.join(_data_dir, "history.jsonl")
 TICK_INTERVAL = 0.2  # 200ms output interval
 SCAN_INTERVAL = 5.0  # 5s device scan interval
 
@@ -81,9 +83,37 @@ total_chars = 0
 session_burst_wpm_sum = 0.0
 session_forward_chars = 0
 session_backspaces = 0
+session_start_time = 0.0
 
 monitored_paths: set[str] = set()
 permission_error = False
+
+
+def save_session():
+    if burst_count == 0:
+        return
+    avg_wpm = round(session_burst_wpm_sum / burst_count)
+    total_fwd = session_forward_chars
+    total_bs = session_backspaces
+    if total_fwd > 0:
+        acc = round((total_fwd - total_bs) / total_fwd * 100, 1)
+    else:
+        acc = 100.0
+    dur = round(time.time() - session_start_time) if session_start_time > 0 else 0
+    record = {
+        "ts": int(time.time()),
+        "wpm": avg_wpm,
+        "acc": acc,
+        "bursts": burst_count,
+        "chars": total_chars,
+        "dur": dur,
+    }
+    try:
+        os.makedirs(os.path.dirname(HISTORY_FILE), exist_ok=True)
+        with open(HISTORY_FILE, "a") as f:
+            f.write(json.dumps(record) + "\n")
+    except OSError:
+        pass
 
 
 def reset_session(signum=None, frame=None):
@@ -92,6 +122,8 @@ def reset_session(signum=None, frame=None):
     global forward_chars_in_burst, backspaces_in_burst, net_chars_in_burst
     global word_lengths, current_word_len
     global burst_start_time, last_key_time, burst_active
+    global session_start_time
+    save_session()
     last_burst_wpm = 0
     last_burst_accuracy = 100.0
     burst_count = 0
@@ -107,6 +139,7 @@ def reset_session(signum=None, frame=None):
     burst_start_time = 0.0
     last_key_time = 0.0
     burst_active = False
+    session_start_time = 0.0
 
 
 signal.signal(signal.SIGUSR1, reset_session)
@@ -160,7 +193,7 @@ def finish_burst():
 def on_key(code: int):
     global forward_chars_in_burst, backspaces_in_burst, net_chars_in_burst
     global burst_start_time, last_key_time, burst_active
-    global word_lengths, current_word_len
+    global word_lengths, current_word_len, session_start_time
 
     if code not in TYPEABLE_KEYS:
         return
@@ -180,6 +213,8 @@ def on_key(code: int):
     if not burst_active:
         burst_active = True
         burst_start_time = now
+        if session_start_time == 0.0:
+            session_start_time = time.time()
         forward_chars_in_burst = 0
         backspaces_in_burst = 0
         net_chars_in_burst = 0
@@ -382,6 +417,9 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         pass
     finally:
+        if burst_active:
+            finish_burst()
+        save_session()
         try:
             os.unlink(STATE_FILE)
         except FileNotFoundError:
