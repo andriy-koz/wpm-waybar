@@ -22,28 +22,22 @@ def main():
     if mode == "burst":
         wpm = state.get("last_burst_wpm", 0)
         acc = state.get("last_burst_accuracy", 100.0)
-        if wpm > 0:
-            acc_str = f"{acc:.0f}%" if acc == 100.0 else f"{acc:.1f}%"
-            print(json.dumps({
-                "text": f"\u21af {wpm}",
-                "tooltip": f"Last burst: {wpm} WPM ({acc_str} acc)",
-                "class": "has-data",
-            }))
-        else:
-            print(json.dumps({"text": "\u21af", "tooltip": "No bursts yet", "class": "no-data"}))
+        acc_str = f"{acc:.0f}%" if acc == 100.0 else f"{acc:.1f}%"
+        print(json.dumps({
+            "text": f"\u21af {wpm} · {acc_str}",
+            "tooltip": f"Last burst: {wpm} WPM ({acc_str} acc)",
+            "class": "has-data" if wpm > 0 else "no-data",
+        }))
     elif mode == "avg":
         wpm = state.get("session_avg_wpm", 0)
         bursts = state.get("burst_count", 0)
         acc = state.get("session_accuracy", 100.0)
-        if wpm > 0:
-            acc_str = f"{acc:.0f}%" if acc == 100.0 else f"{acc:.1f}%"
-            print(json.dumps({
-                "text": f"\u2300 {wpm}",
-                "tooltip": f"Session avg: {wpm} WPM ({acc_str} acc, {bursts} bursts)",
-                "class": "has-data",
-            }))
-        else:
-            print(json.dumps({"text": "\u2300", "tooltip": "No bursts yet", "class": "no-data"}))
+        acc_str = f"{acc:.0f}%" if acc == 100.0 else f"{acc:.1f}%"
+        print(json.dumps({
+            "text": f"\u2300 {wpm} · {acc_str}",
+            "tooltip": f"Session avg: {wpm} WPM ({acc_str} acc, {bursts} bursts)",
+            "class": "has-data" if wpm > 0 else "no-data",
+        }))
 
 if __name__ == "__main__":
     main()

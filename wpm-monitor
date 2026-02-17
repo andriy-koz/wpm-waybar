@@ -324,15 +324,17 @@ def format_live_output(state: dict) -> str:
     if state["active"]:
         wpm = state["live_wpm"]
         acc = state.get("session_accuracy", 100.0)
-        text = f"\U000f030c {wpm}" if wpm > 0 else "\U000f030c"
         acc_str = f"{acc:.0f}%" if acc == 100.0 else f"{acc:.1f}%"
+        text = f"\U000f030c {wpm} · {acc_str}"
         tooltip = f"Live: {wpm} WPM ({acc_str} acc)\nSession: {state['burst_count']} bursts, {state['total_chars']} chars"
         obj = {"text": text, "tooltip": tooltip, "class": "active"}
     else:
+        wpm = state["last_burst_wpm"]
         acc = state.get("session_accuracy", 100.0)
         acc_str = f"{acc:.0f}%" if acc == 100.0 else f"{acc:.1f}%"
+        text = f"\U000f030c {wpm} · {acc_str}"
         tooltip = f"WPM monitor idle\nSession: {state['burst_count']} bursts, {state['total_chars']} chars ({acc_str} acc)"
-        obj = {"text": "\U000f030c", "tooltip": tooltip, "class": "idle"}
+        obj = {"text": text, "tooltip": tooltip, "class": "idle"}
 
     return json.dumps(obj)
 

@@ -75,8 +75,8 @@ Append to your waybar `style.css`:
 #custom-wpm-live,
 #custom-wpm-burst,
 #custom-wpm-avg {
-    min-width: 12px;
-    margin: 0 3px;
+    min-width: 105px;
+    margin: 0 14px;
 }
 
 #custom-wpm-live.active {
@@ -102,24 +102,25 @@ killall waybar && waybar &
 
 ## Usage
 
-Once configured, the modules appear in your Waybar:
+Once configured, the modules appear in your Waybar with WPM and accuracy always visible:
 
 | Module | Idle | Active |
 |--------|------|--------|
-| wpm-live | `󰌌` (dimmed) | `󰌌 85` (orange) |
-| wpm-burst | `↯` (dimmed) | `↯ 92` |
-| wpm-avg | `⌀` (dimmed) | `⌀ 78` |
+| wpm-live | `󰌌 0 · 100%` (dimmed) | `󰌌 85 · 97.2%` (orange) |
+| wpm-burst | `↯ 0 · 100%` (dimmed) | `↯ 92 · 98.5%` |
+| wpm-avg | `⌀ 0 · 100%` (dimmed) | `⌀ 78 · 96.1%` |
 
-- **Typing** triggers live WPM calculation in real time
+Modules reserve a fixed width so the bar layout stays stable when values change.
+
+- **Typing** triggers live WPM and accuracy calculation in real time
 - **Pausing** for 1.5 seconds ends the current burst
 - **Right-click** any module to reset session stats
-- **Hover** any module for a tooltip with session details (including accuracy)
 
 ## How It Works
 
 `wpm-monitor` is a persistent daemon that reads raw key events from `/dev/input/` via evdev. It detects typing bursts (separated by 1.5s of inactivity), calculates WPM using the standard 5-characters-per-word formula, and outputs JSON for Waybar's `custom` module protocol. It also writes state to `/tmp/wpm-monitor.json` so the burst/avg modules can read it independently.
 
-WPM is calculated on **net characters** (forward keystrokes minus backspaces), so corrections don't inflate your speed. Accuracy is tracked per-burst and per-session, visible in tooltips. Ctrl+Backspace and Ctrl+W (word delete) are handled correctly, and key repeats (holding a key) are counted.
+WPM is calculated on **net characters** (forward keystrokes minus backspaces), so corrections don't inflate your speed. Accuracy is tracked per-burst and per-session, displayed inline next to WPM (e.g. `󰌌 85 · 97.2%`). Ctrl+Backspace and Ctrl+W (word delete) are handled correctly, and key repeats (holding a key) are counted.
 
 ## Uninstall
 

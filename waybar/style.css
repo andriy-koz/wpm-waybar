@@ -4,8 +4,8 @@
 #custom-wpm-live,
 #custom-wpm-burst,
 #custom-wpm-avg {
-  min-width: 12px;
-  margin: 0 3px;
+  min-width: 105px;
+  margin: 0 14px;
 }
 
 #custom-wpm-live.active {
