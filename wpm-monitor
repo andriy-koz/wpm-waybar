@@ -55,7 +55,7 @@ for i in range(ecodes.KEY_A, ecodes.KEY_L + 1):
 for i in range(ecodes.KEY_Z, ecodes.KEY_M + 1):
     LETTER_KEYS.add(i)
 
-BURST_TIMEOUT = 1.5  # seconds of inactivity to end a burst
+BURST_TIMEOUT = 1.0  # seconds of inactivity to end a burst
 _runtime_dir = os.environ.get("XDG_RUNTIME_DIR", "/tmp")
 STATE_FILE = os.path.join(_runtime_dir, "wpm-monitor.json")
 LOCK_FILE = os.path.join(_runtime_dir, "wpm-monitor.lock")
@@ -133,7 +133,7 @@ def finish_burst():
     global forward_chars_in_burst, backspaces_in_burst, net_chars_in_burst
     global session_forward_chars, session_backspaces
     global word_lengths, current_word_len
-    if net_chars_in_burst >= 5:  # minimum net chars for a meaningful burst
+    if net_chars_in_burst >= 10:  # minimum net chars for a meaningful burst
         wpm = calc_wpm(net_chars_in_burst, burst_start_time, last_key_time)
         if wpm > 0:
             last_burst_wpm = wpm
