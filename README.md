@@ -118,9 +118,15 @@ Modules reserve a fixed width so the bar layout stays stable when values change.
 
 ## How It Works
 
-`wpm-monitor` is a persistent daemon that reads raw key events from `/dev/input/` via evdev. It detects typing bursts (separated by 1.5s of inactivity), calculates WPM using the standard 5-characters-per-word formula, and outputs JSON for Waybar's `custom` module protocol. It also writes state to `/tmp/wpm-monitor.json` so the burst/avg modules can read it independently.
+`wpm-monitor` is a persistent daemon that reads raw key events from `/dev/input/` via evdev. It detects typing bursts (separated by 1.5s of inactivity), calculates WPM using the standard 5-characters-per-word formula, and outputs JSON for Waybar's `custom` module protocol. It also writes state to `$XDG_RUNTIME_DIR/wpm-monitor.json` (falls back to `/tmp/`) so the burst/avg modules can read it independently. The state file is created with `0600` permissions so only your user can read it.
 
 WPM is calculated on **net characters** (forward keystrokes minus backspaces), so corrections don't inflate your speed. Accuracy is tracked per-burst and per-session, displayed inline next to WPM (e.g. `󰌌 85 · 97.2%`). Ctrl+Backspace and Ctrl+W (word delete) are handled correctly, and key repeats (holding a key) are counted.
+
+## Security Note
+
+This tool requires membership in the **input** group to read keyboard events via evdev. This is a system-wide permission -- once your user is in the `input` group, **any process running as your user** can read raw keyboard input from all input devices, not just this tool. This is equivalent to keylogger-level access.
+
+The monitor itself is safe -- it only counts keystrokes for WPM/accuracy statistics and never records or transmits what you type. However, you should be aware that the `input` group permission extends to all software running under your account.
 
 ## Uninstall
 
