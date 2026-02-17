@@ -67,6 +67,17 @@ echo "Installed wpm-status  -> $INSTALL_DIR/wpm-status"
 install -m 755 "$SCRIPT_DIR/wpm-chart" "$INSTALL_DIR/wpm-chart"
 echo "Installed wpm-chart   -> $INSTALL_DIR/wpm-chart"
 
+# Install Neovim plugin (optional)
+NVIM_PLUGINS_DIR="$HOME/.config/nvim/lua/plugins"
+if [ -d "$NVIM_PLUGINS_DIR" ]; then
+    cp "$SCRIPT_DIR/nvim/wpm-mode.lua" "$NVIM_PLUGINS_DIR/wpm-mode.lua"
+    echo "Installed wpm-mode.lua -> $NVIM_PLUGINS_DIR/wpm-mode.lua"
+else
+    echo "[INFO] Neovim plugins dir not found ($NVIM_PLUGINS_DIR)"
+    echo "       To filter nvim navigation from WPM, manually copy:"
+    echo "         cp nvim/wpm-mode.lua ~/.config/nvim/lua/plugins/"
+fi
+
 # Kill any old instance
 pkill -f "wpm-monitor" 2>/dev/null && echo "Stopped old wpm-monitor process" || true
 

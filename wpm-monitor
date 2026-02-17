@@ -59,6 +59,7 @@ BURST_TIMEOUT = 1.0  # seconds of inactivity to end a burst
 _runtime_dir = os.environ.get("XDG_RUNTIME_DIR", "/tmp")
 STATE_FILE = os.path.join(_runtime_dir, "wpm-monitor.json")
 LOCK_FILE = os.path.join(_runtime_dir, "wpm-monitor.lock")
+NVIM_MODE_FILE = os.path.join(_runtime_dir, "wpm-nvim-mode")
 _data_dir = os.path.join(os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share")), "wpm-monitor")
 HISTORY_FILE = os.path.join(_data_dir, "history.jsonl")
 TICK_INTERVAL = 0.2  # 200ms output interval
@@ -87,6 +88,11 @@ session_start_time = 0.0
 
 monitored_paths: set[str] = set()
 permission_error = False
+
+# Hyprland focused window tracking (Layer 2 safety net)
+_focused_class = ""
+_focused_title = ""
+_nvim_suppressed = False
 
 
 def save_session():
@@ -160,6 +166,43 @@ def is_keyboard(dev: evdev.InputDevice) -> bool:
     return any(k in ev_key_caps for k in LETTER_KEYS)
 
 
+TERMINAL_CLASSES = {"Alacritty", "kitty", "com.mitchellh.ghostty"}
+
+
+def is_nvim_typing_mode() -> bool:
+    """Check if keystrokes should be counted based on Neovim mode state.
+
+    Layer 1: Read mode file written by the nvim plugin.
+    Layer 2: Hyprland safety net — if mode file says "normal" but focused
+             window isn't a terminal with nvim, the file may be stale.
+    Fail open: any error -> count keystrokes.
+    """
+    global _nvim_suppressed
+    try:
+        with open(NVIM_MODE_FILE) as f:
+            mode = f.read().strip()
+    except FileNotFoundError:
+        _nvim_suppressed = False
+        return True  # no file = no nvim running, count everything
+    except OSError:
+        _nvim_suppressed = False
+        return True  # fail open
+
+    if mode == "insert":
+        _nvim_suppressed = False
+        return True
+
+    # mode == "normal" (or anything else) — Layer 2 Hyprland safety net
+    if _focused_class and _focused_class not in TERMINAL_CLASSES:
+        # Focused window isn't a terminal — mode file is stale
+        _nvim_suppressed = False
+        return True
+
+    # nvim in normal mode — suppress keystrokes
+    _nvim_suppressed = True
+    return False
+
+
 def finish_burst():
     global burst_active, last_burst_wpm, last_burst_accuracy, burst_count
     global total_chars, session_burst_wpm_sum, burst_start_time
@@ -194,6 +237,9 @@ def on_key(code: int):
     global forward_chars_in_burst, backspaces_in_burst, net_chars_in_burst
     global burst_start_time, last_key_time, burst_active
     global word_lengths, current_word_len, session_start_time
+
+    if not is_nvim_typing_mode():
+        return
 
     if code not in TYPEABLE_KEYS:
         return
@@ -293,6 +339,35 @@ async def scanner():
         await asyncio.sleep(SCAN_INTERVAL)
 
 
+async def hyprland_listener():
+    """Listen for Hyprland activewindow events to track focused window."""
+    global _focused_class, _focused_title
+    sig = os.environ.get("HYPRLAND_INSTANCE_SIGNATURE")
+    if not sig:
+        return  # not on Hyprland, graceful degradation
+
+    socket_path = os.path.join(_runtime_dir, "hypr", sig, ".socket2.sock")
+
+    while True:
+        try:
+            reader, _ = await asyncio.open_unix_connection(socket_path)
+            while True:
+                line = await reader.readline()
+                if not line:
+                    break
+                decoded = line.decode("utf-8", errors="replace").strip()
+                if decoded.startswith("activewindow>>"):
+                    payload = decoded[len("activewindow>>"):]
+                    parts = payload.split(",", 1)
+                    _focused_class = parts[0] if parts else ""
+                    _focused_title = parts[1] if len(parts) > 1 else ""
+        except (OSError, ConnectionError):
+            pass
+        _focused_class = ""
+        _focused_title = ""
+        await asyncio.sleep(2)
+
+
 def build_state() -> dict:
     now = time.monotonic()
     active = burst_active and (now - last_key_time) <= BURST_TIMEOUT
@@ -336,6 +411,7 @@ def build_state() -> dict:
         "session_accuracy": session_accuracy,
         "burst_count": burst_count,
         "total_chars": total_chars + (net_chars_in_burst if active else 0),
+        "nvim_suppressed": _nvim_suppressed,
         "error": permission_error,
     }
 
@@ -360,19 +436,21 @@ def format_live_output(state: dict) -> str:
         }
         return json.dumps(obj)
 
+    nvim_note = "\n(nvim: filtered)" if state.get("nvim_suppressed") else ""
+
     if state["active"]:
         wpm = state["live_wpm"]
         acc = state.get("session_accuracy", 100.0)
         acc_str = f"{acc:.0f}%" if acc == 100.0 else f"{acc:.1f}%"
         text = f"\U000f030c {wpm} · {acc_str}"
-        tooltip = f"Live: {wpm} WPM ({acc_str} acc)\nSession: {state['burst_count']} bursts, {state['total_chars']} chars"
+        tooltip = f"Live: {wpm} WPM ({acc_str} acc)\nSession: {state['burst_count']} bursts, {state['total_chars']} chars{nvim_note}"
         obj = {"text": text, "tooltip": tooltip, "class": "active"}
     else:
         wpm = state["last_burst_wpm"]
         acc = state.get("session_accuracy", 100.0)
         acc_str = f"{acc:.0f}%" if acc == 100.0 else f"{acc:.1f}%"
         text = f"\U000f030c {wpm} · {acc_str}"
-        tooltip = f"WPM monitor idle\nSession: {state['burst_count']} bursts, {state['total_chars']} chars ({acc_str} acc)"
+        tooltip = f"WPM monitor idle\nSession: {state['burst_count']} bursts, {state['total_chars']} chars ({acc_str} acc){nvim_note}"
         obj = {"text": text, "tooltip": tooltip, "class": "idle"}
 
     return json.dumps(obj)
@@ -391,7 +469,7 @@ async def output_ticker():
 
 
 async def main():
-    # Clean up stale state file
+    # Clean up stale state file (not NVIM_MODE_FILE — owned by nvim plugin)
     try:
         os.unlink(STATE_FILE)
     except FileNotFoundError:
@@ -400,6 +478,7 @@ async def main():
     await asyncio.gather(
         scanner(),
         output_ticker(),
+        hyprland_listener(),
     )
 
 
@@ -420,12 +499,9 @@ if __name__ == "__main__":
         if burst_active:
             finish_burst()
         save_session()
-        try:
-            os.unlink(STATE_FILE)
-        except FileNotFoundError:
-            pass
-        try:
-            os.unlink(LOCK_FILE)
-        except FileNotFoundError:
-            pass
+        for f in (STATE_FILE, LOCK_FILE):
+            try:
+                os.unlink(f)
+            except FileNotFoundError:
+                pass
         os.close(lock_fd)

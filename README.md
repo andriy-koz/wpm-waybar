@@ -122,6 +122,20 @@ Modules reserve a fixed width so the bar layout stays stable when values change.
 
 WPM is calculated on **net characters** (forward keystrokes minus backspaces), so corrections don't inflate your speed. Accuracy is tracked per-burst and per-session, displayed inline next to WPM (e.g. `󰌌 85 · 97.2%`). Ctrl+Backspace and Ctrl+W (word delete) are handled correctly, and key repeats (holding a key) are counted.
 
+## Neovim Filtering
+
+Normal-mode navigation in Neovim (hjkl, w, b, dd, etc.) would otherwise inflate WPM readings. An included Neovim plugin signals the current mode to `wpm-monitor`, which suppresses keystrokes when Neovim is in normal/visual/command mode.
+
+The installer automatically copies the plugin if `~/.config/nvim/lua/plugins/` exists (LazyVim). For manual install:
+
+```sh
+cp nvim/wpm-mode.lua ~/.config/nvim/lua/plugins/
+```
+
+When active, the Waybar tooltip shows "(nvim: filtered)".
+
+A Hyprland safety net prevents stale mode files from suppressing keystrokes when you switch to non-terminal applications. If Hyprland is not running, Layer 1 (mode file) still works standalone.
+
 ## Security Note
 
 This tool requires membership in the **input** group to read keyboard events via evdev. This is a system-wide permission -- once your user is in the `input` group, **any process running as your user** can read raw keyboard input from all input devices, not just this tool. This is equivalent to keylogger-level access.
