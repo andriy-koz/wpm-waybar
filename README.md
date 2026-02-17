@@ -111,13 +111,15 @@ Once configured, the modules appear in your Waybar:
 | wpm-avg | `⌀` (dimmed) | `⌀ 78` |
 
 - **Typing** triggers live WPM calculation in real time
-- **Pausing** for 2 seconds ends the current burst
+- **Pausing** for 1.5 seconds ends the current burst
 - **Right-click** any module to reset session stats
-- **Hover** any module for a tooltip with session details
+- **Hover** any module for a tooltip with session details (including accuracy)
 
 ## How It Works
 
-`wpm-monitor` is a persistent daemon that reads raw key events from `/dev/input/` via evdev. It detects typing bursts (separated by 2s of inactivity), calculates WPM using the standard 5-characters-per-word formula, and outputs JSON for Waybar's `custom` module protocol. It also writes state to `/tmp/wpm-monitor.json` so the burst/avg modules can read it independently.
+`wpm-monitor` is a persistent daemon that reads raw key events from `/dev/input/` via evdev. It detects typing bursts (separated by 1.5s of inactivity), calculates WPM using the standard 5-characters-per-word formula, and outputs JSON for Waybar's `custom` module protocol. It also writes state to `/tmp/wpm-monitor.json` so the burst/avg modules can read it independently.
+
+WPM is calculated on **net characters** (forward keystrokes minus backspaces), so corrections don't inflate your speed. Accuracy is tracked per-burst and per-session, visible in tooltips. Ctrl+Backspace and Ctrl+W (word delete) are handled correctly, and key repeats (holding a key) are counted.
 
 ## Uninstall
 

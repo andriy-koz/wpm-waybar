@@ -11,7 +11,6 @@ import json
 import os
 import signal
 import sys
-import tempfile
 import time
 
 try:
@@ -19,7 +18,7 @@ try:
     from evdev import ecodes
 except ImportError:
     # Output error state and exit
-    err = {"text": "\U000f0324 ?", "tooltip": "python-evdev not installed\nsudo pacman -S python-evdev", "class": "error"}
+    err = {"text": "\U000f030c ?", "tooltip": "python-evdev not installed\nsudo pacman -S python-evdev", "class": "error"}
     print(json.dumps(err), flush=True)
     sys.exit(1)
 
@@ -44,6 +43,8 @@ TYPEABLE_KEYS.update([
     ecodes.KEY_102ND,
 ])
 
+WORD_SEPARATOR_KEYS = {ecodes.KEY_SPACE, ecodes.KEY_ENTER, ecodes.KEY_TAB}
+
 # Letter keys used to identify keyboards (vs mice/other devices)
 LETTER_KEYS = set()
 for i in range(ecodes.KEY_Q, ecodes.KEY_P + 1):
@@ -58,29 +59,48 @@ STATE_FILE = "/tmp/wpm-monitor.json"
 TICK_INTERVAL = 0.2  # 200ms output interval
 SCAN_INTERVAL = 5.0  # 5s device scan interval
 
-# Shared state
-chars_in_burst = 0
+# Shared state — per-burst tracking
+forward_chars_in_burst = 0   # non-backspace typeable keys
+backspaces_in_burst = 0      # effective backspace count (word deletes count as N)
+net_chars_in_burst = 0       # actual characters surviving (forward - effective backspaces)
+word_lengths: list[int] = [] # stack of completed word lengths in current burst
+current_word_len = 0         # chars in current incomplete word
+ctrl_held = False            # modifier tracking
 burst_start_time = 0.0
 last_key_time = 0.0
 burst_active = False
 
+# Session-level state
 last_burst_wpm = 0
+last_burst_accuracy = 100.0
 burst_count = 0
 total_chars = 0
 session_burst_wpm_sum = 0.0
+session_forward_chars = 0
+session_backspaces = 0
 
 monitored_paths: set[str] = set()
 permission_error = False
 
 
 def reset_session(signum=None, frame=None):
-    global last_burst_wpm, burst_count, total_chars, session_burst_wpm_sum
-    global chars_in_burst, burst_start_time, last_key_time, burst_active
+    global last_burst_wpm, last_burst_accuracy, burst_count, total_chars
+    global session_burst_wpm_sum, session_forward_chars, session_backspaces
+    global forward_chars_in_burst, backspaces_in_burst, net_chars_in_burst
+    global word_lengths, current_word_len
+    global burst_start_time, last_key_time, burst_active
     last_burst_wpm = 0
+    last_burst_accuracy = 100.0
     burst_count = 0
     total_chars = 0
     session_burst_wpm_sum = 0.0
-    chars_in_burst = 0
+    session_forward_chars = 0
+    session_backspaces = 0
+    forward_chars_in_burst = 0
+    backspaces_in_burst = 0
+    net_chars_in_burst = 0
+    word_lengths = []
+    current_word_len = 0
     burst_start_time = 0.0
     last_key_time = 0.0
     burst_active = False
@@ -105,42 +125,108 @@ def is_keyboard(dev: evdev.InputDevice) -> bool:
 
 
 def finish_burst():
-    global burst_active, chars_in_burst, last_burst_wpm, burst_count
+    global burst_active, last_burst_wpm, last_burst_accuracy, burst_count
     global total_chars, session_burst_wpm_sum, burst_start_time
-    if chars_in_burst >= 5:  # minimum chars for a meaningful burst
-        wpm = calc_wpm(chars_in_burst, burst_start_time, last_key_time)
+    global forward_chars_in_burst, backspaces_in_burst, net_chars_in_burst
+    global session_forward_chars, session_backspaces
+    global word_lengths, current_word_len
+    if net_chars_in_burst >= 5:  # minimum net chars for a meaningful burst
+        wpm = calc_wpm(net_chars_in_burst, burst_start_time, last_key_time)
         if wpm > 0:
             last_burst_wpm = wpm
             burst_count += 1
             session_burst_wpm_sum += wpm
-    total_chars += chars_in_burst
-    chars_in_burst = 0
+    if forward_chars_in_burst > 0:
+        last_burst_accuracy = round(
+            net_chars_in_burst / forward_chars_in_burst * 100, 1
+        )
+    else:
+        last_burst_accuracy = 100.0
+    session_forward_chars += forward_chars_in_burst
+    session_backspaces += backspaces_in_burst
+    total_chars += net_chars_in_burst
+    forward_chars_in_burst = 0
+    backspaces_in_burst = 0
+    net_chars_in_burst = 0
+    word_lengths = []
+    current_word_len = 0
     burst_active = False
     burst_start_time = 0.0
 
 
 def on_key(code: int):
-    global chars_in_burst, burst_start_time, last_key_time, burst_active
+    global forward_chars_in_burst, backspaces_in_burst, net_chars_in_burst
+    global burst_start_time, last_key_time, burst_active
+    global word_lengths, current_word_len
+
     if code not in TYPEABLE_KEYS:
         return
+
+    # Ctrl+key handling: only process Ctrl+Backspace and Ctrl+W (word delete)
+    if ctrl_held:
+        if code not in (ecodes.KEY_BACKSPACE, ecodes.KEY_W):
+            return  # ignore Ctrl+C, Ctrl+V, etc.
+
     now = time.monotonic()
+
     # Check if previous burst should end
     if burst_active and (now - last_key_time) > BURST_TIMEOUT:
         finish_burst()
+
     # Start new burst if needed
     if not burst_active:
         burst_active = True
         burst_start_time = now
-        chars_in_burst = 0
-    chars_in_burst += 1
+        forward_chars_in_burst = 0
+        backspaces_in_burst = 0
+        net_chars_in_burst = 0
+        word_lengths = []
+        current_word_len = 0
+
+    # Word delete: Ctrl+Backspace or Ctrl+W
+    if ctrl_held and code in (ecodes.KEY_BACKSPACE, ecodes.KEY_W):
+        if current_word_len > 0:
+            deleted = current_word_len
+            backspaces_in_burst += deleted
+            net_chars_in_burst = max(0, net_chars_in_burst - deleted)
+            current_word_len = 0
+        elif word_lengths:
+            prev_word = word_lengths.pop()
+            deleted = prev_word + 1  # word + the space separator
+            backspaces_in_burst += deleted
+            net_chars_in_burst = max(0, net_chars_in_burst - deleted)
+            current_word_len = 0
+    elif code == ecodes.KEY_BACKSPACE:
+        backspaces_in_burst += 1
+        net_chars_in_burst = max(0, net_chars_in_burst - 1)
+        if current_word_len > 0:
+            current_word_len -= 1
+        elif word_lengths:
+            # Backspaced across word boundary — restore previous word
+            current_word_len = word_lengths.pop()
+    elif code in WORD_SEPARATOR_KEYS:
+        forward_chars_in_burst += 1
+        net_chars_in_burst += 1
+        word_lengths.append(current_word_len)
+        current_word_len = 0
+    else:
+        forward_chars_in_burst += 1
+        net_chars_in_burst += 1
+        current_word_len += 1
+
     last_key_time = now
 
 
 async def device_reader(dev: evdev.InputDevice):
+    global ctrl_held
     try:
         async for event in dev.async_read_loop():
-            if event.type == ecodes.EV_KEY and event.value == 1:  # key down
-                on_key(event.code)
+            if event.type == ecodes.EV_KEY:
+                # Track Ctrl modifier state
+                if event.code in (ecodes.KEY_LEFTCTRL, ecodes.KEY_RIGHTCTRL):
+                    ctrl_held = (event.value != 0)  # 1=down, 2=repeat, 0=up
+                if event.value in (1, 2):  # key down or repeat
+                    on_key(event.code)
     except (OSError, IOError):
         # Device disconnected
         monitored_paths.discard(dev.path)
@@ -178,20 +264,40 @@ def build_state() -> dict:
         finish_burst()
 
     live_wpm = 0
-    if active and chars_in_burst > 0:
-        live_wpm = calc_wpm(chars_in_burst, burst_start_time, now)
+    if active and net_chars_in_burst > 0:
+        live_wpm = calc_wpm(net_chars_in_burst, burst_start_time, now)
+
+    # Live accuracy for current burst
+    if active and forward_chars_in_burst > 0:
+        live_accuracy = round(
+            net_chars_in_burst / forward_chars_in_burst * 100, 1
+        )
+    elif active:
+        live_accuracy = 100.0
+    else:
+        live_accuracy = last_burst_accuracy
 
     session_avg = 0
     if burst_count > 0:
         session_avg = round(session_burst_wpm_sum / burst_count)
 
+    # Session accuracy
+    total_fwd = session_forward_chars + (forward_chars_in_burst if active else 0)
+    total_bs = session_backspaces + (backspaces_in_burst if active else 0)
+    if total_fwd > 0:
+        session_accuracy = round((total_fwd - total_bs) / total_fwd * 100, 1)
+    else:
+        session_accuracy = 100.0
+
     return {
         "live_wpm": live_wpm,
         "active": active,
         "last_burst_wpm": last_burst_wpm,
+        "last_burst_accuracy": last_burst_accuracy,
         "session_avg_wpm": session_avg,
+        "session_accuracy": session_accuracy,
         "burst_count": burst_count,
-        "total_chars": total_chars + chars_in_burst,
+        "total_chars": total_chars + (net_chars_in_burst if active else 0),
         "error": permission_error,
     }
 
@@ -209,7 +315,7 @@ def write_state(state: dict):
 def format_live_output(state: dict) -> str:
     if state["error"]:
         obj = {
-            "text": "\U000f0324 ?",
+            "text": "\U000f030c ?",
             "tooltip": "Cannot read input devices\nsudo usermod -aG input $USER\nthen log out and back in",
             "class": "error",
         }
@@ -217,13 +323,16 @@ def format_live_output(state: dict) -> str:
 
     if state["active"]:
         wpm = state["live_wpm"]
-        text = f"\U000f0324 {wpm}" if wpm > 0 else "\U000f0324"
-        total = state["total_chars"]
-        tooltip = f"Live: {wpm} WPM\nBurst chars: {state['total_chars'] - (state['total_chars'] - total)}\nSession: {state['burst_count']} bursts, {state['total_chars']} chars"
+        acc = state.get("session_accuracy", 100.0)
+        text = f"\U000f030c {wpm}" if wpm > 0 else "\U000f030c"
+        acc_str = f"{acc:.0f}%" if acc == 100.0 else f"{acc:.1f}%"
+        tooltip = f"Live: {wpm} WPM ({acc_str} acc)\nSession: {state['burst_count']} bursts, {state['total_chars']} chars"
         obj = {"text": text, "tooltip": tooltip, "class": "active"}
     else:
-        tooltip = f"WPM monitor idle\nSession: {state['burst_count']} bursts, {state['total_chars']} chars"
-        obj = {"text": "\U000f0324", "tooltip": tooltip, "class": "idle"}
+        acc = state.get("session_accuracy", 100.0)
+        acc_str = f"{acc:.0f}%" if acc == 100.0 else f"{acc:.1f}%"
+        tooltip = f"WPM monitor idle\nSession: {state['burst_count']} bursts, {state['total_chars']} chars ({acc_str} acc)"
+        obj = {"text": "\U000f030c", "tooltip": tooltip, "class": "idle"}
 
     return json.dumps(obj)
 
