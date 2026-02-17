@@ -27,6 +27,13 @@ else
     echo "[OK] python-evdev found"
 fi
 
+if ! python3 -c "import plotext" &>/dev/null; then
+    echo "[WARN] plotext not found (needed for wpm-chart)."
+    echo "       Install it with: pip install plotext"
+else
+    echo "[OK] plotext found"
+fi
+
 if ! groups | grep -qw input; then
     echo "[WARN] Your user is not in the 'input' group."
     echo "       Run: sudo usermod -aG input $USER"
@@ -57,6 +64,9 @@ echo "Installed wpm-monitor -> $INSTALL_DIR/wpm-monitor"
 install -m 755 "$SCRIPT_DIR/wpm-status" "$INSTALL_DIR/wpm-status"
 echo "Installed wpm-status  -> $INSTALL_DIR/wpm-status"
 
+install -m 755 "$SCRIPT_DIR/wpm-chart" "$INSTALL_DIR/wpm-chart"
+echo "Installed wpm-chart   -> $INSTALL_DIR/wpm-chart"
+
 # Kill any old instance
 pkill -f "wpm-monitor" 2>/dev/null && echo "Stopped old wpm-monitor process" || true
 
@@ -71,4 +81,9 @@ echo '     "custom/wpm-live", "custom/wpm-burst", "custom/wpm-avg"'
 echo "  3. Add the module definitions from: waybar/config.jsonc"
 echo "  4. Add the styles from: waybar/style.css to your waybar style.css"
 echo "  5. Restart Waybar: killall waybar && waybar &"
+echo
+echo "For Hyprland floating chart window, add to hyprland.conf:"
+echo '  windowrulev2 = float, class:^(wpm-chart)$'
+echo '  windowrulev2 = size 900 500, class:^(wpm-chart)$'
+echo '  windowrulev2 = center, class:^(wpm-chart)$'
 echo

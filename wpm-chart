@@ -1,0 +1,289 @@
+#!/usr/bin/env python3
+"""TUI chart for WPM history - shows typing speed and accuracy over time.
+
+Reads session history from ~/.local/share/wpm-monitor/history.jsonl and
+renders a single chart using plotext with a btop-inspired dark theme.
+Tab toggles between WPM and Accuracy views.
+
+Keys: Tab=toggle WPM/Acc, w=week, m=month, q=quarter, y=year, a=all, Esc/Q=quit
+"""
+
+import json
+import os
+import sys
+import time
+
+try:
+    import plotext as plt
+except ImportError:
+    print("plotext is required for the WPM chart.")
+    print("Install it with: pip install plotext")
+    sys.exit(1)
+
+import select
+import termios
+import tty
+from datetime import datetime
+
+# --- 256-color palette (btop-inspired) ---
+BG = 234        # near-black canvas/axes
+CHROME = 240    # dim gray for ticks/labels
+GUIDE = 238     # subtle avg reference line
+WPM_COLOR = 208 # orange (btop CPU style)
+ACC_COLOR = 75  # sky-blue contrast
+
+_data_dir = os.path.join(
+    os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share")),
+    "wpm-monitor",
+)
+HISTORY_FILE = os.path.join(_data_dir, "history.jsonl")
+
+RANGES = {
+    "w": ("Week", 7 * 86400),
+    "m": ("Month", 30 * 86400),
+    "q": ("Quarter", 90 * 86400),
+    "y": ("Year", 365 * 86400),
+    "a": ("All Time", 0),
+}
+
+
+def _ansi(code, text):
+    """Wrap text in 256-color ANSI escape."""
+    return f"\033[38;5;{code}m{text}\033[0m"
+
+
+def _wpm_ylim(wpms):
+    """Padded WPM range with minimum span of 20."""
+    lo, hi = min(wpms), max(wpms)
+    span = hi - lo
+    if span < 20:
+        mid = (lo + hi) / 2
+        lo, hi = mid - 10, mid + 10
+    else:
+        pad = span * 0.15
+        lo, hi = lo - pad, hi + pad
+    return lo, hi
+
+
+def _acc_ylim(accs):
+    """Smart accuracy range: 90-101 if all data >95%, else 80-101."""
+    if min(accs) > 95:
+        return 90, 101
+    return 80, 101
+
+
+def _statusbar_str(active_range, mode):
+    """Return ANSI-colored status bar string: mode toggle + range selector."""
+    # Mode indicator
+    if mode == "wpm":
+        mode_str = _ansi(WPM_COLOR, "WPM") + _ansi(CHROME, "/") + _ansi(CHROME, "Acc")
+    else:
+        mode_str = _ansi(CHROME, "WPM") + _ansi(CHROME, "/") + _ansi(ACC_COLOR, "Acc")
+    mode_part = "  " + _ansi(CHROME, "Tab:") + " " + mode_str
+
+    # Range keys
+    keys = [("w", "eek"), ("m", "onth"), ("q", "uarter"), ("y", "ear"), ("a", "ll")]
+    parts = []
+    for key, label in keys:
+        if key == active_range:
+            parts.append(_ansi(WPM_COLOR, f"[{key}]{label}"))
+        else:
+            parts.append(_ansi(CHROME, f"[{key}]{label}"))
+    range_part = "  ".join(parts)
+
+    return mode_part + "    " + range_part + "  " + _ansi(CHROME, "|") + "  " + _ansi(CHROME, "Esc = quit")
+
+
+def load_history():
+    sessions = []
+    try:
+        with open(HISTORY_FILE) as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    try:
+                        sessions.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        continue
+    except FileNotFoundError:
+        pass
+    return sessions
+
+
+def filter_by_range(sessions, range_key):
+    if range_key == "a" or not sessions:
+        return sessions
+    cutoff = time.time() - RANGES[range_key][1]
+    return [s for s in sessions if s["ts"] >= cutoff]
+
+
+def aggregate(sessions, max_points=80):
+    if len(sessions) <= max_points:
+        return sessions
+    bucket_size = len(sessions) / max_points
+    aggregated = []
+    i = 0.0
+    while i < len(sessions):
+        end = min(int(i + bucket_size), len(sessions))
+        bucket = sessions[int(i):end]
+        if not bucket:
+            break
+        total_chars = sum(s.get("chars", 1) or 1 for s in bucket)
+        avg_wpm = sum(s["wpm"] * (s.get("chars", 1) or 1) for s in bucket) / total_chars
+        avg_acc = sum(s["acc"] * (s.get("chars", 1) or 1) for s in bucket) / total_chars
+        aggregated.append({
+            "ts": bucket[len(bucket) // 2]["ts"],
+            "wpm": round(avg_wpm, 1),
+            "acc": round(avg_acc, 1),
+        })
+        i += bucket_size
+    return aggregated
+
+
+def format_date(ts, span_days):
+    dt = datetime.fromtimestamp(ts)
+    if span_days <= 7:
+        return dt.strftime("%a %H:%M")
+    elif span_days <= 90:
+        return dt.strftime("%b %d")
+    else:
+        return dt.strftime("%b %Y")
+
+
+def render(sessions, range_key, mode):
+    plt.clear_figure()
+
+    range_name = RANGES[range_key][0]
+    filtered = filter_by_range(sessions, range_key)
+
+    if not filtered:
+        sys.stdout.write("\033[H\033[2J")
+        sys.stdout.write(f"  WPM History - {range_name}\n\n")
+        sys.stdout.write("  No data for this time range. Start typing with wpm-monitor running!\n\n")
+        sys.stdout.write(_statusbar_str(range_key, mode))
+        sys.stdout.flush()
+        return
+
+    data = aggregate(filtered)
+
+    if len(data) == 1:
+        data = [data[0], data[0]]
+
+    span_days = (data[-1]["ts"] - data[0]["ts"]) / 86400 if len(data) > 1 else 1
+
+    labels = [format_date(s["ts"], span_days) for s in data]
+    xs = list(range(len(data)))
+    wpms = [s["wpm"] for s in data]
+    accs = [s["acc"] for s in data]
+
+    avg_wpm = sum(s["wpm"] for s in filtered) / len(filtered)
+    avg_acc = sum(s["acc"] for s in filtered) / len(filtered)
+    max_wpm = max(s["wpm"] for s in filtered)
+
+    term = os.get_terminal_size()
+    tw, th = term.columns, term.lines
+
+    # Status bar (built first so we know its line count)
+    statusbar = _statusbar_str(range_key, mode)
+
+    # Disable plotext's internal size limiting so we control it exactly
+    plt.limit_size(False, False)
+    # plot_size is the canvas; build() output = plot_size + 1 line
+    # Reserve: 1 for build overhead + 1 for statusbar = th - 2
+    plt.plot_size(tw, th - 2)
+    plt.canvas_color(BG)
+    plt.axes_color(BG)
+    plt.ticks_color(CHROME)
+    plt.grid(False, False)
+
+    if mode == "wpm":
+        plt.title(f"WPM  ·  avg {avg_wpm:.0f}  ·  max {max_wpm:.0f}  ·  {len(filtered)} sessions  [{range_name}]")
+        plt.plot(xs, wpms, marker="braille", color=WPM_COLOR)
+        plt.hline(avg_wpm, color=GUIDE)
+        wpm_lo, wpm_hi = _wpm_ylim(wpms)
+        plt.ylim(wpm_lo, wpm_hi)
+        plt.ylabel("WPM")
+    else:
+        plt.title(f"Accuracy  ·  avg {avg_acc:.1f}%  ·  {len(filtered)} sessions  [{range_name}]")
+        plt.plot(xs, accs, marker="braille", color=ACC_COLOR)
+        plt.hline(avg_acc, color=GUIDE)
+        acc_lo, acc_hi = _acc_ylim(accs)
+        plt.ylim(acc_lo, acc_hi)
+        plt.ylabel("%")
+
+    # X-axis date ticks
+    n_ticks = min(8, len(labels))
+    if n_ticks > 1:
+        step = max(1, len(labels) // n_ticks)
+        tick_indices = list(range(0, len(labels), step))
+        if tick_indices[-1] != len(labels) - 1:
+            tick_indices.append(len(labels) - 1)
+        plt.xticks(tick_indices, [labels[i] for i in tick_indices])
+
+    chart = plt.build()
+    chart_lines = chart.rstrip("\n").split("\n")
+
+    # Write chart at top, statusbar pinned to last row via cursor positioning
+    sys.stdout.write("\033[H\033[J")
+    for i, line in enumerate(chart_lines[:th - 1]):
+        sys.stdout.write(f"\033[{i + 1};1H{line}")
+    sys.stdout.write(f"\033[{th};1H{statusbar}")
+    sys.stdout.flush()
+
+
+def get_key(timeout=0.1):
+    if select.select([sys.stdin], [], [], timeout)[0]:
+        ch = sys.stdin.read(1)
+        if ch == "\x1b":
+            if select.select([sys.stdin], [], [], 0.05)[0]:
+                sys.stdin.read(1)
+                sys.stdin.read(1)
+                return None
+            return "ESC"
+        return ch
+    return None
+
+
+def main():
+    sessions = load_history()
+
+    if not sessions:
+        print("No WPM history found.")
+        print(f"Expected history file at: {HISTORY_FILE}")
+        print("Start typing with wpm-monitor running to build history.")
+        input("\nPress Enter to exit...")
+        return
+
+    range_key = "m"
+    mode = "wpm"
+
+    old_settings = termios.tcgetattr(sys.stdin)
+    # Enter alternate screen buffer (no scrollback pollution)
+    sys.stdout.write("\033[?1049h\033[?25l")
+    sys.stdout.flush()
+    try:
+        tty.setraw(sys.stdin.fileno())
+
+        render(sessions, range_key, mode)
+
+        while True:
+            key = get_key(timeout=0.2)
+            if key is None:
+                continue
+            if key in ("ESC", "Q", "\x03"):
+                break
+            if key == "\t":
+                mode = "acc" if mode == "wpm" else "wpm"
+                render(sessions, range_key, mode)
+            elif key.lower() in RANGES:
+                range_key = key.lower()
+                render(sessions, range_key, mode)
+    finally:
+        termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
+        # Leave alternate screen buffer, restore cursor
+        sys.stdout.write("\033[?25h\033[?1049l")
+        sys.stdout.flush()
+
+
+if __name__ == "__main__":
+    main()
