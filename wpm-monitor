@@ -488,13 +488,38 @@ async def main():
     )
 
 
+async def follower_mode():
+    """Read-only mode: relay state from the primary instance to Waybar."""
+    while True:
+        try:
+            with open(STATE_FILE) as f:
+                state = json.load(f)
+            line = format_live_output(state)
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            line = format_live_output({
+                "live_wpm": 0, "active": False, "last_burst_wpm": 0,
+                "last_burst_accuracy": 100.0, "session_avg_wpm": 0,
+                "session_accuracy": 100.0, "burst_count": 0,
+                "total_chars": 0, "nvim_suppressed": False, "error": False,
+            })
+        try:
+            print(line, flush=True)
+        except BrokenPipeError:
+            sys.exit(0)
+        await asyncio.sleep(TICK_INTERVAL)
+
+
 if __name__ == "__main__":
-    # Single-instance guard: exit silently if another instance is running
+    # Single-instance guard: follower mode if another instance is running
     lock_fd = os.open(LOCK_FILE, os.O_WRONLY | os.O_CREAT, 0o600)
     try:
         fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
         os.close(lock_fd)
+        try:
+            asyncio.run(follower_mode())
+        except KeyboardInterrupt:
+            pass
         sys.exit(0)
 
     try:
