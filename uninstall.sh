@@ -16,12 +16,19 @@ rm -f /tmp/wpm-monitor.json /tmp/wpm-monitor.json.tmp
 echo "Cleaned up state files"
 
 # Remove scripts
-for script in wpm-monitor wpm-status; do
+for script in wpm-monitor wpm-status wpm-chart; do
     if [ -f "$INSTALL_DIR/$script" ]; then
         rm "$INSTALL_DIR/$script"
         echo "Removed $INSTALL_DIR/$script"
     fi
 done
+
+# Remove venv if it exists
+VENV_DIR="$HOME/.local/share/wpm-venv"
+if [ -d "$VENV_DIR" ]; then
+    rm -rf "$VENV_DIR"
+    echo "Removed $VENV_DIR"
+fi
 
 echo
 echo "=== Scripts removed! ==="

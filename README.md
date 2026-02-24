@@ -18,6 +18,7 @@ Right-click any module to reset the session.
 - **Waybar**
 - **Python 3**
 - **python-evdev** -- `sudo pacman -S python-evdev` (Arch) / `sudo apt install python3-evdev` (Debian) / `pip install evdev`
+- **plotext** (optional, for `wpm-chart`) -- the installer creates a venv automatically if plotext isn't available system-wide
 - Your user must be in the **input** group: `sudo usermod -aG input $USER` (log out and back in)
 
 ## Install
@@ -28,7 +29,7 @@ cd wpm-waybar
 bash install.sh
 ```
 
-The installer copies the scripts to `~/.local/bin/` and checks dependencies. It will not modify your Waybar config automatically -- you do that part manually (see below).
+The installer copies the scripts to `~/.local/bin/` and checks dependencies. If plotext is not installed system-wide, it automatically creates a Python venv at `~/.local/share/wpm-venv/` and installs it there. It will not modify your Waybar config automatically -- you do that part manually (see below).
 
 ## Waybar Configuration
 

@@ -13,9 +13,13 @@ import os
 import sys
 import time
 
+# If plotext isn't available in the system Python, try the wpm venv
 try:
     import plotext as plt
 except ImportError:
+    _venv = os.path.expanduser("~/.local/share/wpm-venv/bin/python3")
+    if os.path.isfile(_venv) and _venv != sys.executable:
+        os.execv(_venv, [_venv] + sys.argv)
     print("plotext is required for the WPM chart.")
     print("Install it with: pip install plotext")
     sys.exit(1)

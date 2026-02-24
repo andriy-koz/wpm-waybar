@@ -27,9 +27,12 @@ else
     echo "[OK] python-evdev found"
 fi
 
+VENV_DIR="$HOME/.local/share/wpm-venv"
 if ! python3 -c "import plotext" &>/dev/null; then
-    echo "[WARN] plotext not found (needed for wpm-chart)."
-    echo "       Install it with: pip install plotext"
+    echo "[INFO] plotext not found system-wide, creating venv..."
+    python3 -m venv "$VENV_DIR"
+    "$VENV_DIR/bin/pip" install --quiet plotext
+    echo "[OK] plotext installed in $VENV_DIR"
 else
     echo "[OK] plotext found"
 fi
@@ -94,7 +97,7 @@ echo "  4. Add the styles from: waybar/style.css to your waybar style.css"
 echo "  5. Restart Waybar: killall waybar && waybar &"
 echo
 echo "For Hyprland floating chart window, add to hyprland.conf:"
-echo '  windowrulev2 = float, class:^(wpm-chart)$'
-echo '  windowrulev2 = size 900 500, class:^(wpm-chart)$'
-echo '  windowrulev2 = center, class:^(wpm-chart)$'
+echo '  windowrule = float on, match:class ^(wpm-chart)$'
+echo '  windowrule = size 900 500, match:class ^(wpm-chart)$'
+echo '  windowrule = center on, match:class ^(wpm-chart)$'
 echo
